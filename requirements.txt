@@ -1,0 +1,7 @@
+git+https://github.com/MedicalSchoolHamburgBiomechLab/BiomechLabTools.git#egg=labtools
+numpy
+pandas
+matplotlib
+python-dotenv
+seaborn
+spm1d
