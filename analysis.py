@@ -1,5 +1,5 @@
+from itertools import product
 from pathlib import Path
-from sys import platform
 
 import numpy as np
 import pandas as pd
@@ -7,24 +7,12 @@ import seaborn as sns
 import spm1d
 from matplotlib import pyplot as plt
 from labtools.signal_processing.resampling import resize_signal
-from dotenv import load_dotenv
 
-load_dotenv()
-
-
-def get_data_file_path():
-    import os
-    one_drive_root = Path(os.getenv('ONE_DRIVE_ROOT'))
-    path = one_drive_root.joinpath('Dokumente')
-    path = path.joinpath('projects')
-    path = path.joinpath('PetersDaten')
-    path = path.joinpath('continuousstatistics')
-    path = path.joinpath('DatenPeter.xlsx')
-    assert path.exists()
-    return path
+from common import get_data_file_path
+from data_processing import get_dataframes
 
 
-def get_dataframes(excel_path: Path, parameter: str = 'DFAa1', test: str = 'vt'):
+def read_data(excel_path: Path, parameter: str = 'DFAa1', test: str = 'vt'):
     if parameter not in ['DFAa1', 'HR']:
         raise ValueError(f"Parameter {parameter} is not supported. Use 'DFAa1' or 'HR'.")
     if test not in ['ramp', 'vt']:
@@ -260,7 +248,8 @@ def perform_spm1D(df1: pd.DataFrame,
     # Perform post-hoc paired t-tests if the ANOVA is significant
     # if Fi.h0reject:
     if True:
-        print("ANOVA was significant, performing post-hoc tests...")
+        print("...performing post-hoc tests...(irrespective of ANOVA result)")
+        # print("ANOVA was significant, performing post-hoc tests...")
 
         # Bonferroni correction for multiple comparisons
         adj_p = alpha / 3
@@ -376,60 +365,20 @@ def perform_spm1D_OLD(df1, df2, df3, alpha: float = 0.05):
 if __name__ == '__main__':
     path = get_data_file_path()
     path_plot = path.parent.joinpath('plots')
-    # GET THE PRE AND POST DATAFRAMES
-    param_name = 'DFAa1'  # 'DFAa1' or 'HR'
-    test_type = 'ramp'  # 'ramp' or 'vt'
+    param_names = ['DFAa1', 'HR']
+    test_types = ['ramp', 'vt']
     make_plots = False
 
-    df_pre, df_post_24, df_post_48 = get_dataframes(path, parameter=param_name, test=test_type)
-    #
-    # SOME PLOTTING
-    #
-    # plot_participant_params(df_pre, df_post_24, df_post_48, param_name=param_name, path=path_plot)
-    # plot_raw_signals(df_pre, df_post, path_plot)
+    for param_name, test_type in product(param_names, test_types):
+        df_pre, df_post_24, df_post_48 = get_dataframes(parameter=param_name, test=test_type)
 
-    #
-    #
-    # time normalize or filter the dataframes
-    #
-    if test_type == 'vt':
-        # FILTER THE DATAFRAMES
-        df_pre, df_post_24, df_post_48 = filter_dataframes(df_pre, df_post_24, df_post_48, min_length=440)
-        # save the filtered dataframes to excel
-        path_out = path.parent.joinpath('filtered_data_VT.xlsx')
-        with pd.ExcelWriter(path_out) as writer:
-            df_pre.to_excel(writer, sheet_name='Pre')
-            df_post_24.to_excel(writer, sheet_name='Post 24h')
-            df_post_48.to_excel(writer, sheet_name='Post 48h')
-        if make_plots:
-            plot_participant_params(df_pre, df_post_24, df_post_48, path_plot, param_name=param_name)
-            plot_raw_signals(df_pre, df_post_24, path_plot)
-
-        # EXPERIMENTAL:
-        df_pre, df_post_24, df_post_48 = time_normalize_dataframes(df_pre, df_post_24, df_post_48, remove=0)
-    else:
-        # TIME NORMALIZE THE DATAFRAMES
-        df_pre_norm, df_post_24_norm, df_post_48_norm = time_normalize_dataframes(df_pre, df_post_24, df_post_48,
-                                                                                  remove=0)
-        if make_plots:
-            plot_normalized_signals(df_pre_norm, df_post_24_norm, df_post_48_norm, path_plot,
-                                    plot_individual_signals=True)
-        # save the normalized dataframes to excel
-        path_out = path.parent.joinpath('normalized_data_RAMP.xlsx')
-        # Save the normalized dataframes to Excel
-        with pd.ExcelWriter(path_out) as writer:
-            df_pre_norm.to_excel(writer, sheet_name='Pre')
-            df_post_24_norm.to_excel(writer, sheet_name='Post 24h')
-            df_post_48_norm.to_excel(writer, sheet_name='Post 48h')
-        df_pre, df_post_24, df_post_48 = df_pre_norm, df_post_24_norm, df_post_48_norm
-
-    print(len(df_pre))
-    print(len(df_post_24))
-    print(len(df_post_48))
-    perform_spm1D(df_pre,
-                  df_post_24,
-                  df_post_48,
-                  x_label="Normalized Test Duration [%]",
-                  y_label='DFAa1' if param_name == 'DFAa1' else 'Heart Rate [bpm]',
-                  alpha=0.05,
-                  path_plot=path_plot)
+        print(len(df_pre))
+        print(len(df_post_24))
+        print(len(df_post_48))
+        perform_spm1D(df_pre,
+                      df_post_24,
+                      df_post_48,
+                      x_label="Normalized Test Duration [%]",
+                      y_label='DFAa1' if param_name == 'DFAa1' else 'Heart Rate [bpm]',
+                      alpha=0.05,
+                      path_plot=None)  # path_plot=path_plot
