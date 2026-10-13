@@ -1,5 +1,6 @@
 from itertools import product
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -193,7 +194,9 @@ def perform_spm1D(df1: pd.DataFrame,
                   x_label: str,
                   y_label: str,
                   alpha: float = 0.05,
-                  path_plot=None):
+                  nonparametric: bool | None = None,
+                  path_plot=None,
+                  plot_file_prefix: str = ''):
     # Ensure that the dataframes have the same column order.
     df2 = df2[df1.columns]
     df3 = df3[df1.columns]
@@ -229,14 +232,49 @@ def perform_spm1D(df1: pd.DataFrame,
     rm_factor = np.array([0] * n_subjects + [1] * n_subjects + [2] * n_subjects)
     subj = np.array(list(range(n_subjects)) * n_conditions)
 
-    # The anova1rm function requires data in (observations x variables) format.
-    # Here, observations are (subjects x conditions), and variables are the time points.
-    F = spm1d.stats.anova1rm(signals, rm_factor, subj, equal_var=True)
-    Fi = F.inference(alpha=alpha)
+    # Check normality
+    norm = spm1d.stats.normality
 
-    # ax2.set_title('One-way repeated measures ANOVA')
-    Fi.plot(ax=ax2)
-    Fi.plot_threshold_label(fontsize=14)
+    # omnibus model residuals
+    spmi = norm.anova1rm(signals, rm_factor, subj).inference(0.05)
+    print('normality anova1rm:', spmi.h0reject, spmi.zstar)
+    if nonparametric is None:
+        nonparam = spmi.h0reject
+    else:
+        nonparam = nonparametric
+    suffix = '_nonparam' if nonparam else ''
+
+    # post-hoc: normality of paired differences
+    for (a, b), name in [((yA, yB), 'PRE-POST24'),
+                         ((yA, yC), 'PRE-POST48'),
+                         ((yB, yC), 'POST24-POST48')]:
+        si = norm.ttest_paired(a, b).inference(0.05)
+        print(name, si.h0reject, si.zstar)
+
+    anova_h0_reject = False
+    if nonparam:
+        # non-parametric test:
+        np.random.seed(1303)
+        snpmi = spm1d.stats.nonparam.anova1rm(signals, rm_factor, subj).inference(alpha, iterations=10000)
+        print('anova1rm:', snpmi.h0reject, snpmi.zstar, snpmi.clusters)
+        print('spm1d nonparam: F* =', snpmi.zstar, ' clusters:', [c.endpoints for c in snpmi.clusters])
+        snpmi.plot(ax=ax2)
+        snpmi.plot_threshold_label(ax=ax2, fontsize=14)
+        # snpmi.plot_p_values()  # doesn't look too nice..
+        anova_h0_reject = snpmi.h0reject
+    else:
+        # The anova1rm function requires data in (observations x variables) format.
+        # Here, observations are (subjects x conditions), and variables are the time points.
+        F = spm1d.stats.anova1rm(signals, rm_factor, subj, equal_var=True)
+        Fi = F.inference(alpha=alpha)
+        anova_h0_reject = Fi.h0reject
+
+        # smoothness
+        print(f"{F.fwhm=}")
+        print(f"{F.resels=}")
+        # ax2.set_title('One-way repeated measures ANOVA')
+        Fi.plot(ax=ax2)
+        Fi.plot_threshold_label(ax=ax2, fontsize=14)
     ax2.set_xlabel(x_label, fontsize=16)
 
     # set x and y tick labels font size to 16
@@ -246,10 +284,9 @@ def perform_spm1D(df1: pd.DataFrame,
     ax2.tick_params(axis='y', labelsize=16)
 
     # Perform post-hoc paired t-tests if the ANOVA is significant
-    # if Fi.h0reject:
-    if True:
-        print("...performing post-hoc tests...(irrespective of ANOVA result)")
-        # print("ANOVA was significant, performing post-hoc tests...")
+    if anova_h0_reject:
+        # print("...performing post-hoc tests...(irrespective of ANOVA result)")
+        print("ANOVA was significant, performing post-hoc tests...")
 
         # Bonferroni correction for multiple comparisons
         adj_p = alpha / 3
@@ -258,28 +295,25 @@ def perform_spm1D(df1: pd.DataFrame,
         # Create a new figure for post-hoc tests
         # fig_posthoc, axes_posthoc = plt.subplots(3, 1, figsize=(8, 15))
         fig_posthoc, axes_posthoc = plt.subplots(1, 3, figsize=(15, 8))
-        fig_posthoc.suptitle(f'Post-Hoc Paired t-tests (Bonferroni adjusted α={adj_p:.3f})', fontsize=16)
+        kind = 'non-parametric' if nonparam else 'parametric'
+        fig_posthoc.suptitle(f'Post-hoc paired t-tests, {kind} (Bonferroni α={adj_p:.4f})', fontsize=16)
 
-        # Post-hoc test: pre vs. post 24h
-        spmi_AB = spm1d.stats.ttest_paired(yA, yB).inference(alpha=adj_p, two_tailed=True)
-        ax_AB = axes_posthoc[0]
-        spmi_AB.plot(ax=ax_AB)
-        spmi_AB.plot_threshold_label(ax=ax_AB, fontsize=14)
-        ax_AB.set_title('PRE vs. POST24h', fontsize=16)
+        for i, ((a, b), title) in enumerate([((yA, yB), 'PRE vs. POST24h'),
+                                             ((yA, yC), 'PRE vs. POST48h'),
+                                             ((yB, yC), 'POST24h vs. POST48h')]):
+            if nonparam:
+                snpmi_ab = spm1d.stats.nonparam.ttest_paired(a, b).inference(adj_p, two_tailed=True, iterations=10000)
+                print(title, snpmi_ab.h0reject, snpmi_ab.zstar, snpmi_ab.clusters)
+                res = snpmi_ab
+            else:
+                spmi_ab = spm1d.stats.ttest_paired(a, b).inference(alpha=adj_p, two_tailed=True)
+                print(title, spmi_ab.h0reject, spmi_ab.zstar, spmi_ab.clusters)
+                res = spmi_ab
 
-        # Post-hoc test: pre vs. post 48h
-        spmi_AC = spm1d.stats.ttest_paired(yA, yC).inference(alpha=adj_p, two_tailed=True)
-        ax_AC = axes_posthoc[1]
-        spmi_AC.plot(ax=ax_AC)
-        spmi_AC.plot_threshold_label(ax=ax_AC, fontsize=14)
-        ax_AC.set_title('PRE vs. POST48h', fontsize=16)
-
-        # Post-hoc test: post 24h vs. post 48h
-        spmi_BC = spm1d.stats.ttest_paired(yB, yC).inference(alpha=adj_p, two_tailed=True)
-        ax_BC = axes_posthoc[2]
-        spmi_BC.plot(ax=ax_BC)
-        spmi_BC.plot_threshold_label(ax=ax_BC, fontsize=14)
-        ax_BC.set_title('POST24h vs. POST48h', fontsize=16)
+            ax_ab = axes_posthoc[i]
+            res.plot(ax=ax_ab)
+            res.plot_threshold_label(ax=ax_ab, fontsize=14)
+            ax_ab.set_title(title, fontsize=16)
 
         # increase axis labels and tick labels font size for x and y axes
         for ax in axes_posthoc:
@@ -287,20 +321,23 @@ def perform_spm1D(df1: pd.DataFrame,
             ax.tick_params(axis='y', labelsize=16)
             ax.set_xlabel(x_label, fontsize=16)
 
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        fig_posthoc.tight_layout(rect=[0, 0.03, 1, 0.95])
         if path_plot:
-            plt.savefig(path_plot.joinpath('spm_posthoc_tests.png'))
-            print(f"Saved post-hoc tests plot to {path_plot.joinpath('spm_posthoc_tests.png')}.")
-            plt.close()
+            filename = f'{plot_file_prefix}spm_posthoc_tests{suffix}.png'
+            filepath = path_plot.joinpath(filename)
+            fig_posthoc.savefig(filepath)
+            print(f"Saved post-hoc tests plot to {filepath}.")
+        plt.close(fig_posthoc)
     else:
         print("ANOVA was not significant, no post-hoc tests needed.")
 
     if path_plot:
         fig.tight_layout()
-        fig.savefig(path_plot.joinpath('spm_anova1rm.png'))
-        print(f"Saved ANOVA plot to {path_plot.joinpath('spm_anova1rm.png')}.")
-    plt.close()
-    # plt.show()
+        filename = f'{plot_file_prefix}spm_anova1rm{suffix}.png'
+        filepath = path_plot.joinpath(filename)
+        fig.savefig(filepath)
+        print(f"Saved ANOVA plot to {filepath}.")
+    plt.close(fig)
 
 
 def perform_spm1D_OLD(df1, df2, df3, alpha: float = 0.05):
@@ -367,6 +404,7 @@ if __name__ == '__main__':
     path_plot = path.parent.joinpath('plots')
     param_names = ['DFAa1', 'HR']
     test_types = ['ramp', 'vt']
+    # test_types = ['vt']
     make_plots = False
 
     for param_name, test_type in product(param_names, test_types):
@@ -375,10 +413,18 @@ if __name__ == '__main__':
         print(len(df_pre))
         print(len(df_post_24))
         print(len(df_post_48))
+
+        participants = df_post_48.columns.values
+
+        print(f"Running test for {test_type} on {param_name} for {len(participants)} participants.")
         perform_spm1D(df_pre,
                       df_post_24,
                       df_post_48,
                       x_label="Normalized Test Duration [%]",
                       y_label='DFAa1' if param_name == 'DFAa1' else 'Heart Rate [bpm]',
                       alpha=0.05,
-                      path_plot=None)  # path_plot=path_plot
+                      nonparametric=True,
+                      # path_plot=None,
+                      path_plot=path_plot,
+                      plot_file_prefix=f"{param_name}_{test_type}_",
+                      )

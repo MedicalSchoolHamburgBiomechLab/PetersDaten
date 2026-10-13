@@ -65,7 +65,7 @@ def trim_signal(s, remove=60):
     return arr
 
 
-def time_normalize_dataframes(df1, df2, df3, remove=60):
+def time_normalize_dataframes(df1, df2, df3, remove=60, new_length=101):
     # Create a mask for non-NaN values in both dataframes
     df_mask = df1.notna() & df2.notna() & df3.notna()
     # Bring both dataframes to the same length for each participant
@@ -90,8 +90,8 @@ def time_normalize_dataframes(df1, df2, df3, remove=60):
         if len(arr1) < min_len:
             print(f"Signal {col1} is too short after trimming: {len(arr1)} samples. Skipping this signal.")
             continue
-        new_length = 101
-        # new_length = max_length
+        if new_length > max_length:
+            ValueError(f"The requested length ({new_length})is longer than the maximum possible length ({max_length}).")
         arr1_norm = resize_signal(arr1, new_length=new_length)
         arr2_norm = resize_signal(arr2, new_length=new_length)
         arr3_norm = resize_signal(arr3, new_length=new_length)
