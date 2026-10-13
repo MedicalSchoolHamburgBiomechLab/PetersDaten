@@ -193,6 +193,12 @@ def get_dataframes(parameter: str = 'DFAa1', test: str = 'vt'):
     make_plots = False
 
     df_pre, df_post_24, df_post_48 = read_data(path, parameter=parameter, test=test)
+    # Check if missing data exist:
+    for name, df in zip(["pre", "post_24", "post_48"], [df_pre, df_post_24, df_post_48]):
+        valid = df.notna()
+        gaps = valid.cumprod().sum() != valid.sum()
+        if gaps.any():
+            raise ValueError(f"Missing data in {name}: columns {gaps[gaps].index.tolist()}")
     #
     # SOME PLOTTING
     #
